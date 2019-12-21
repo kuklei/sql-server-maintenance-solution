@@ -1,4 +1,6 @@
-﻿/*
+﻿USE master 
+GO
+/*
 
 SQL Server Maintenance Solution - SQL Server 2005, SQL Server 2008, SQL Server 2008 R2, SQL Server 2012, SQL Server 2014, SQL Server 2016, SQL Server 2017, and SQL Server 2019
 
@@ -19,7 +21,72 @@ https://ola.hallengren.com
 
 */
 
-USE [master] -- Specify the database in which the objects will be created.
+/*  --comment this line if you need to create the DB
+
+	CREATE DATABASE [maintainDB] ON  PRIMARY 
+	( NAME = N'maintainDB', FILENAME = N'Z:\Backup\SAD\maintainDB' , SIZE = 4096KB , FILEGROWTH = 4096KB )
+	 LOG ON 
+	( NAME = N'maintainDB_log', FILENAME = N'Z:\Backup\SAD\maintainDBL' , SIZE = 4096KB , MAXSIZE = 1048576KB , FILEGROWTH = 4096KB )
+	GO
+
+	ALTER DATABASE [maintainDB] SET COMPATIBILITY_LEVEL = 100
+	GO
+	ALTER DATABASE [maintainDB] SET ANSI_NULL_DEFAULT OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET ANSI_NULLS OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET ANSI_PADDING OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET ANSI_WARNINGS OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET ARITHABORT OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET AUTO_CLOSE OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET AUTO_SHRINK OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET AUTO_CREATE_STATISTICS ON
+	GO
+	ALTER DATABASE [maintainDB] SET AUTO_UPDATE_STATISTICS ON 
+	GO
+	ALTER DATABASE [maintainDB] SET CURSOR_CLOSE_ON_COMMIT OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET CURSOR_DEFAULT  GLOBAL 
+	GO
+	ALTER DATABASE [maintainDB] SET CONCAT_NULL_YIELDS_NULL OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET NUMERIC_ROUNDABORT OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET QUOTED_IDENTIFIER OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET RECURSIVE_TRIGGERS OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET  DISABLE_BROKER 
+	GO
+	ALTER DATABASE [maintainDB] SET AUTO_UPDATE_STATISTICS_ASYNC OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET DATE_CORRELATION_OPTIMIZATION OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET PARAMETERIZATION SIMPLE 
+	GO
+	ALTER DATABASE [maintainDB] SET READ_COMMITTED_SNAPSHOT OFF 
+	GO
+	ALTER DATABASE [maintainDB] SET  READ_WRITE 
+	GO
+	ALTER DATABASE [maintainDB] SET RECOVERY SIMPLE 
+	GO
+	ALTER DATABASE [maintainDB] SET  MULTI_USER 
+	GO
+	ALTER DATABASE [maintainDB] SET PAGE_VERIFY CHECKSUM  
+	GO
+	USE [maintainDB]
+	GO
+	IF NOT EXISTS (SELECT name FROM sys.filegroups WHERE is_default=1 AND name = N'PRIMARY') ALTER DATABASE [maintainDB] MODIFY FILEGROUP [PRIMARY] DEFAULT
+	GO
+
+--*/
+
+USE [maintainDB] -- Specify the database in which the objects will be created.
 
 SET NOCOUNT ON
 
@@ -29,12 +96,15 @@ DECLARE @CleanupTime int
 DECLARE @OutputFileDirectory nvarchar(max)
 DECLARE @LogToTable nvarchar(max)
 DECLARE @ErrorMessage nvarchar(max)
+DECLARE @User_DBs nvarchar (MAX)
 
-SET @CreateJobs          = 'Y'          -- Specify whether jobs should be created.
-SET @BackupDirectory     = NULL         -- Specify the backup root directory. If no directory is specified, the default backup directory is used.
-SET @CleanupTime         = NULL         -- Time in hours, after which backup files are deleted. If no time is specified, then no backup files are deleted.
-SET @OutputFileDirectory = NULL         -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
-SET @LogToTable          = 'Y'          -- Log commands to a table.
+
+SET @CreateJobs          = 'Y'				-- Specify whether jobs should be created.
+SET @BackupDirectory     = N'X:\Backup'		-- Specify the backup root directory.
+SET @CleanupTime         = 731				-- Time in hours, after which backup files are deleted. If no time is specified, then no backup files are deleted.
+SET @OutputFileDirectory = N'Z:\Backup\SAD'     -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
+SET @LogToTable          = 'Y'				-- Log commands to a table.
+SET @User_DBs			 = N'USER_DATABASES'	-- specify dattabases that will be considered user databases, leave 'USER_DATABASES' to backup all user dbs in server
 
 IF IS_SRVROLEMEMBER('sysadmin') = 0 AND NOT (DB_ID('rdsadmin') IS NOT NULL AND SUSER_SNAME(0x01) = 'rdsa')
 BEGIN
@@ -8035,6 +8105,8 @@ BEGIN
   SELECT 'Output File Cleanup',
          'cmd /q /c "For /F "tokens=1 delims=" %v In (''ForFiles /P "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '" /m *_*_*_*.txt /d -30 2^>^&1'') do if EXIST "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '"\%v echo del "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '"\%v& del "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '"\%v"',
          'OutputFileCleanup'
+
+	--SELECT * FROM @Jobs AS j
 
   IF @AmazonRDS = 1
   BEGIN
