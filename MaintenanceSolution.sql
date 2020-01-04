@@ -21,12 +21,23 @@ https://ola.hallengren.com
 
 */
 
-/*  --comment this line if you need to create the DB
+/*  --comment this line if you need to re/create the DB
+
+WHILE EXISTS(select NULL from sys.databases where name='maintainDB')
+BEGIN
+    DECLARE @SQL varchar(max)
+    SELECT @SQL = COALESCE(@SQL,'') + 'Kill ' + Convert(varchar, SPId) + ';'
+    FROM MASTER..SysProcesses
+    WHERE DBId = DB_ID(N'maintainDB') AND SPId <> @@SPId
+    EXEC(@SQL)
+    DROP DATABASE [maintainDB]
+END
+GO
 
 	CREATE DATABASE [maintainDB] ON  PRIMARY 
-	( NAME = N'maintainDB', FILENAME = N'Z:\Backup\SAD\maintainDB' , SIZE = 4096KB , FILEGROWTH = 4096KB )
+	( NAME = N'maintainDB', FILENAME = N'Z:\SAD\Backup\maintainDB' , SIZE = 4096KB , FILEGROWTH = 4096KB )
 	 LOG ON 
-	( NAME = N'maintainDB_log', FILENAME = N'Z:\Backup\SAD\maintainDBL' , SIZE = 4096KB , MAXSIZE = 1048576KB , FILEGROWTH = 4096KB )
+	( NAME = N'maintainDB_log', FILENAME = N'Z:\SAD\Backup\maintainDBL' , SIZE = 4096KB , MAXSIZE = 1048576KB , FILEGROWTH = 4096KB )
 	GO
 
 	ALTER DATABASE [maintainDB] SET COMPATIBILITY_LEVEL = 100
@@ -84,6 +95,17 @@ https://ola.hallengren.com
 	IF NOT EXISTS (SELECT name FROM sys.filegroups WHERE is_default=1 AND name = N'PRIMARY') ALTER DATABASE [maintainDB] MODIFY FILEGROUP [PRIMARY] DEFAULT
 	GO
 
+	USE maintainDB
+	GO
+
+CREATE PROC CheckLog
+AS
+	SELECT	 cl.DatabaseName, cl.CommandType, cl.ErrorNumber, cl.ErrorMessage
+			,DATEDIFF(SECOND, cl.StartTime, cl.EndTime) / 60.0 AS DurationMin
+	FROM	 maintainDB.dbo.CommandLog AS cl
+	WHERE	 CAST(cl.StartTime AS DATE) = CAST(GETDATE() AS DATE)
+	ORDER BY cl.StartTime
+GO
 --*/
 
 USE [maintainDB] -- Specify the database in which the objects will be created.
@@ -97,14 +119,17 @@ DECLARE @OutputFileDirectory nvarchar(max)
 DECLARE @LogToTable nvarchar(max)
 DECLARE @ErrorMessage nvarchar(max)
 DECLARE @User_DBs nvarchar (MAX)
+DECLARE @OverrideJobs NVARCHAR(max)
 
 
-SET @CreateJobs          = 'Y'				-- Specify whether jobs should be created.
-SET @BackupDirectory     = N'X:\Backup'		-- Specify the backup root directory.
-SET @CleanupTime         = 731				-- Time in hours, after which backup files are deleted. If no time is specified, then no backup files are deleted.
-SET @OutputFileDirectory = N'Z:\Backup\SAD'     -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
-SET @LogToTable          = 'Y'				-- Log commands to a table.
-SET @User_DBs			 = N'USER_DATABASES'	-- specify dattabases that will be considered user databases, leave 'USER_DATABASES' to backup all user dbs in server
+SET @CreateJobs          = 'Y'					-- Specify whether jobs should be created.
+SET @BackupDirectory     = N'Z:\SAD\Backup'			-- Specify the backup root directory.
+SET @CleanupTime         = 731					-- Time in hours, after which backup files are deleted. If no time is specified, then no backup files are deleted.
+SET @OutputFileDirectory = N'Z:\SAD\Backup'     -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
+SET @LogToTable          = 'Y'					-- Log commands to a table.
+SET @User_DBs			 = N'USER_DATABASES'	-- specify databases that will be considered user databases, leave 'USER_DATABASES' to backup all user dbs in server
+SET @OverrideJobs		 = 'Y'					-- specify Y if you want created jobs to be overriden by the new script (normally yes when directories have changed but keep in mind that jobs will need to be rescheduled
+
 
 IF IS_SRVROLEMEMBER('sysadmin') = 0 AND NOT (DB_ID('rdsadmin') IS NOT NULL AND SUSER_SNAME(0x01) = 'rdsa')
 BEGIN
@@ -124,6 +149,7 @@ CREATE TABLE #Config ([Name] nvarchar(max),
                       [Value] nvarchar(max))
 
 INSERT INTO #Config ([Name], [Value]) VALUES('CreateJobs', @CreateJobs)
+INSERT INTO #Config ([Name], [Value]) VALUES('OverrideJobs', @OverrideJobs)
 INSERT INTO #Config ([Name], [Value]) VALUES('BackupDirectory', @BackupDirectory)
 INSERT INTO #Config ([Name], [Value]) VALUES('CleanupTime', @CleanupTime)
 INSERT INTO #Config ([Name], [Value]) VALUES('OutputFileDirectory', @OutputFileDirectory)
@@ -7924,7 +7950,10 @@ BEGIN
                        OutputFileNamePart01 nvarchar(max),
                        OutputFileNamePart02 nvarchar(max),
                        Selected bit DEFAULT 0,
-                       Completed bit DEFAULT 0)
+                       Completed bit DEFAULT 0,
+/*==========>>		Added fields to generate weekly and daily schedules with steps */
+					   Weekly BIT DEFAULT 1,
+					   Step INT)
 
   DECLARE @CurrentJobID int
   DECLARE @CurrentJobName nvarchar(max)
@@ -8037,74 +8066,98 @@ BEGIN
     SET @JobOwner = SUSER_SNAME(0x01)
   END
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02, Weekly, Step)
   SELECT 'DatabaseBackup - SYSTEM_DATABASES - FULL',
          'EXECUTE [dbo].[DatabaseBackup]' + CHAR(13) + CHAR(10) + '@Databases = ''SYSTEM_DATABASES'',' + CHAR(13) + CHAR(10) + '@Directory = ' + ISNULL('N''' + REPLACE(@BackupDirectory,'''','''''') + '''','NULL') + ',' + CHAR(13) + CHAR(10) + '@BackupType = ''FULL'',' + CHAR(13) + CHAR(10) + '@Verify = ''Y'',' + CHAR(13) + CHAR(10) + '@CleanupTime = ' + ISNULL(CAST(@CleanupTime AS nvarchar),'NULL') + ',' + CHAR(13) + CHAR(10) + '@CheckSum = ''Y'',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
          @DatabaseName,
          'DatabaseBackup',
-         'FULL'
+         'FULL',
+		 0,
+		 2
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02)
+
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02, Weekly, Step)
   SELECT 'DatabaseBackup - USER_DATABASES - DIFF',
          'EXECUTE [dbo].[DatabaseBackup]' + CHAR(13) + CHAR(10) + '@Databases = ''USER_DATABASES'',' + CHAR(13) + CHAR(10) + '@Directory = ' + ISNULL('N''' + REPLACE(@BackupDirectory,'''','''''') + '''','NULL') + ',' + CHAR(13) + CHAR(10) + '@BackupType = ''DIFF'',' + CHAR(13) + CHAR(10) + '@Verify = ''Y'',' + CHAR(13) + CHAR(10) + '@CleanupTime = ' + ISNULL(CAST(@CleanupTime AS nvarchar),'NULL') + ',' + CHAR(13) + CHAR(10) + '@CheckSum = ''Y'',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
           @DatabaseName,
          'DatabaseBackup',
-         'DIFF'
+         'DIFF',
+		 0,
+		 3
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02, Weekly, Step)
   SELECT 'DatabaseBackup - USER_DATABASES - FULL',
          'EXECUTE [dbo].[DatabaseBackup]' + CHAR(13) + CHAR(10) + '@Databases = ''USER_DATABASES'',' + CHAR(13) + CHAR(10) + '@Directory = ' + ISNULL('N''' + REPLACE(@BackupDirectory,'''','''''') + '''','NULL') + ',' + CHAR(13) + CHAR(10) + '@BackupType = ''FULL'',' + CHAR(13) + CHAR(10) + '@Verify = ''Y'',' + CHAR(13) + CHAR(10) + '@CleanupTime = ' + ISNULL(CAST(@CleanupTime AS nvarchar),'NULL') + ',' + CHAR(13) + CHAR(10) + '@CheckSum = ''Y'',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
          @DatabaseName,
          'DatabaseBackup',
-         'FULL'
+         'FULL',
+		 1,
+		 3
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, OutputFileNamePart02, Weekly, Step)
   SELECT 'DatabaseBackup - USER_DATABASES - LOG',
          'EXECUTE [dbo].[DatabaseBackup]' + CHAR(13) + CHAR(10) + '@Databases = ''USER_DATABASES'',' + CHAR(13) + CHAR(10) + '@Directory = ' + ISNULL('N''' + REPLACE(@BackupDirectory,'''','''''') + '''','NULL') + ',' + CHAR(13) + CHAR(10) + '@BackupType = ''LOG'',' + CHAR(13) + CHAR(10) + '@Verify = ''Y'',' + CHAR(13) + CHAR(10) + '@CleanupTime = ' + ISNULL(CAST(@CleanupTime AS nvarchar),'NULL') + ',' + CHAR(13) + CHAR(10) + '@CheckSum = ''Y'',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
          @DatabaseName,
          'DatabaseBackup',
-         'LOG'
+         'LOG',
+		 0,
+		 -1
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, Weekly, Step)
   SELECT 'DatabaseIntegrityCheck - SYSTEM_DATABASES',
          'EXECUTE [dbo].[DatabaseIntegrityCheck]' + CHAR(13) + CHAR(10) + '@Databases = ''SYSTEM_DATABASES'',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
          @DatabaseName,
-         'DatabaseIntegrityCheck'
+         'DatabaseIntegrityCheck',
+		 0,
+		 1
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, Weekly, Step)
   SELECT 'DatabaseIntegrityCheck - USER_DATABASES',
          'EXECUTE [dbo].[DatabaseIntegrityCheck]' + CHAR(13) + CHAR(10) + '@Databases = ''USER_DATABASES' + CASE WHEN @AmazonRDS = 1 THEN ', -rdsadmin' ELSE '' END + ''',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
          @DatabaseName,
-         'DatabaseIntegrityCheck'
+         'DatabaseIntegrityCheck', 
+		 1,
+		 2
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, Weekly, Step)
   SELECT 'IndexOptimize - USER_DATABASES',
          'EXECUTE [dbo].[IndexOptimize]' + CHAR(13) + CHAR(10) + '@Databases = ''USER_DATABASES'',' + CHAR(13) + CHAR(10) + '@LogToTable = ''' + @LogToTable + '''',
          @DatabaseName,
-         'IndexOptimize'
+         'IndexOptimize',
+		 1,
+		 1
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, Weekly, Step)
   SELECT 'sp_delete_backuphistory',
          'DECLARE @CleanupDate datetime' + CHAR(13) + CHAR(10) + 'SET @CleanupDate = DATEADD(dd,-30,GETDATE())' + CHAR(13) + CHAR(10) + 'EXECUTE dbo.sp_delete_backuphistory @oldest_date = @CleanupDate',
          'msdb',
-         'sp_delete_backuphistory'
+         'sp_delete_backuphistory',
+		 1,
+		 4
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01)
+
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, Weekly, Step)
   SELECT 'sp_purge_jobhistory',
          'DECLARE @CleanupDate datetime' + CHAR(13) + CHAR(10) + 'SET @CleanupDate = DATEADD(dd,-30,GETDATE())' + CHAR(13) + CHAR(10) + 'EXECUTE dbo.sp_purge_jobhistory @oldest_date = @CleanupDate',
          'msdb',
-         'sp_purge_jobhistory'
+         'sp_purge_jobhistory',
+		 1,
+		 5
 
-  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01)
+  INSERT INTO @Jobs ([Name], CommandTSQL, DatabaseName, OutputFileNamePart01, Weekly, Step)
   SELECT 'CommandLog Cleanup',
          'DELETE FROM [dbo].[CommandLog]' + CHAR(13) + CHAR(10) + 'WHERE StartTime < DATEADD(dd,-30,GETDATE())',
          @DatabaseName,
-         'CommandLogCleanup'
+         'CommandLogCleanup',
+		 1,
+		 6
 
-  INSERT INTO @Jobs ([Name], CommandCmdExec, OutputFileNamePart01)
+  INSERT INTO @Jobs ([Name], CommandCmdExec, OutputFileNamePart01, Weekly, Step)
   SELECT 'Output File Cleanup',
          'cmd /q /c "For /F "tokens=1 delims=" %v In (''ForFiles /P "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '" /m *_*_*_*.txt /d -30 2^>^&1'') do if EXIST "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '"\%v echo del "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '"\%v& del "' + COALESCE(@OutputFileDirectory,@TokenLogDirectory,@LogDirectory) + '"\%v"',
-         'OutputFileCleanup'
+         'OutputFileCleanup',
+		 1,
+		 7
 
 	--SELECT * FROM @Jobs AS j
 
@@ -8132,19 +8185,65 @@ BEGIN
    WHERE CommandTSQL IS NOT NULL
   END
 
+/*=======>>> add weekly and daily jobs -----------*/
+IF ((SELECT [Value] FROM #Config WHERE Name = 'OverrideJobs') = 'Y')
+		IF EXISTS (SELECT job_id FROM msdb.dbo.sysjobs_view WHERE name = 'WeeklyMaintenance')
+			EXEC msdb.dbo.sp_delete_job @job_name='WeeklyMaintenance', @delete_unused_schedule=1
+		IF EXISTS (SELECT job_id FROM msdb.dbo.sysjobs_view WHERE name = 'DailyMaintenance')
+			EXEC msdb.dbo.sp_delete_job @job_name='DailyMaintenance', @delete_unused_schedule=1
+
+      EXECUTE msdb.dbo.sp_add_job @job_name = 'WeeklyMaintenance', @description = 'WeeklyMaintenance', @category_name = 'Database Maintenance', @owner_login_name = 'sad'
+      EXECUTE msdb.dbo.sp_add_jobserver @job_name = 'WeeklyMaintenance'
+	  EXECUTE msdb.dbo.sp_add_job @job_name = 'DailyMaintenance', @description = 'DailyMaintenance', @category_name = 'Database Maintenance', @owner_login_name = 'sad'
+      EXECUTE msdb.dbo.sp_add_jobserver @job_name = 'DailyMaintenance'
+
+	  EXEC msdb.dbo.sp_add_jobschedule @job_name=N'WeeklyMaintenance', @name=N'WeeklyMaintenanceSchedule', 
+		@enabled=1, 
+		@freq_type=8, 
+		@freq_interval=1, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=1, 
+		@active_start_date=20200103, 
+		@active_end_date=99991231, 
+		@active_start_time=200000, 
+		@active_end_time=235959
+
+	EXEC msdb.dbo.sp_add_jobschedule @job_name=N'DailyMaintenance', @name=N'DailyMaintenanceSchedule', 
+		@enabled=1, 
+		@freq_type=8, 
+		@freq_interval=126, 
+		@freq_subday_type=1, 
+		@freq_subday_interval=0, 
+		@freq_relative_interval=0, 
+		@freq_recurrence_factor=1, 
+		@active_start_date=20200103, 
+		@active_end_date=99991231, 
+		@active_start_time=200000, 
+		@active_end_time=235959
+--step creation vars	  
+DECLARE @weekly BIT, @step INT, @next INT
+/*=======>>> END add weekly and daily jobs -----------*/
+
   WHILE EXISTS (SELECT * FROM @Jobs WHERE Completed = 0 AND Selected = 1)
   BEGIN
-    SELECT @CurrentJobID = JobID,
+    SELECT TOP 1 @CurrentJobID = JobID,
            @CurrentJobName = [Name],
            @CurrentCommandTSQL = CommandTSQL,
            @CurrentCommandCmdExec = CommandCmdExec,
            @CurrentDatabaseName = DatabaseName,
            @CurrentOutputFileNamePart01 = OutputFileNamePart01,
            @CurrentOutputFileNamePart02 = OutputFileNamePart02
+/*=======>>> add weekly and daily jobs -----------*/
+		   ,@weekly = Weekly,
+		   @step = Step
     FROM @Jobs
     WHERE Completed = 0
     AND Selected = 1
-    ORDER BY JobID ASC
+    --ORDER BY JobID ASC
+/*=======>>> add weekly and daily jobs -----------*/
+	ORDER BY Weekly, Step
 
     IF @CurrentCommandTSQL IS NOT NULL AND @AmazonRDS = 1
     BEGIN
@@ -8191,11 +8290,52 @@ BEGIN
       IF LEN(@CurrentOutputFileName) > 200 SET @CurrentOutputFileName = NULL
     END
 
-    IF @CurrentJobStepSubSystem IS NOT NULL AND @CurrentJobStepCommand IS NOT NULL AND NOT EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE [name] = @CurrentJobName)
+    IF @CurrentJobStepSubSystem IS NOT NULL 
+	AND @CurrentJobStepCommand IS NOT NULL 
+	AND (NOT EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE [name] = @CurrentJobName) 
+			OR (SELECT [Value] FROM #Config WHERE Name = 'OverrideJobs') = 'Y')
     BEGIN
+	 IF ((SELECT [Value] FROM #Config WHERE Name = 'OverrideJobs') = 'Y')
+		IF EXISTS (SELECT job_id FROM msdb.dbo.sysjobs_view WHERE name = @CurrentJobName)
+			EXEC msdb.dbo.sp_delete_job @job_name=@CurrentJobName, @delete_unused_schedule=1
+
       EXECUTE msdb.dbo.sp_add_job @job_name = @CurrentJobName, @description = @JobDescription, @category_name = @JobCategory, @owner_login_name = @JobOwner
       EXECUTE msdb.dbo.sp_add_jobstep @job_name = @CurrentJobName, @step_name = @CurrentJobName, @subsystem = @CurrentJobStepSubSystem, @command = @CurrentJobStepCommand, @output_file_name = @CurrentOutputFileName, @database_name = @CurrentJobStepDatabaseName
       EXECUTE msdb.dbo.sp_add_jobserver @job_name = @CurrentJobName
+
+	  /*=======>>> add weekly and daily jobs -----------*/
+		IF @weekly = 1	AND @step > -1
+		BEGIN
+			IF @step = 7
+				SET @next = 1
+			ELSE
+				SET @next = 3
+			EXECUTE msdb.dbo.sp_add_jobstep @job_name = 'WeeklyMaintenance'
+										  , @step_id = @step
+										  , @on_success_action =  @next
+										  , @step_name = @CurrentJobName
+										  , @subsystem = @CurrentJobStepSubSystem
+										  , @command = @CurrentJobStepCommand
+										  , @output_file_name = @CurrentOutputFileName
+										  , @database_name = @CurrentJobStepDatabaseName		
+		END
+		IF @weekly = 0	AND @step > -1
+		BEGIN
+			IF @step = 3
+				SET @next = 1
+			ELSE
+				SET @next = 3
+			EXECUTE msdb.dbo.sp_add_jobstep @job_name = 'DailyMaintenance'
+										  , @step_id = @step
+										  , @on_success_action = @next
+										  , @step_name = @CurrentJobName
+										  , @subsystem = @CurrentJobStepSubSystem
+										  , @command = @CurrentJobStepCommand
+										  , @output_file_name = @CurrentOutputFileName
+										  , @database_name = @CurrentJobStepDatabaseName	
+		END
+/*=======>>> END add weekly and daily jobs -----------*/
+
     END
 
     UPDATE Jobs
@@ -8214,6 +8354,8 @@ BEGIN
     SET @CurrentJobStepSubSystem = NULL
     SET @CurrentJobStepDatabaseName = NULL
     SET @CurrentOutputFileName = NULL
+	SET @weekly = NULL
+	SET @step =  NULL
 
   END
 
