@@ -3,8 +3,9 @@
 [![stars badge]][stars]
 [![forks badge]][forks]
 [![issues badge]][issues]
-[![bug_report badge]][bug_report]
-[![feature_request badge]][feature_request]
+[![bug report badge]][bug report]
+[![feature request badge]][feature request]
+[![question badge]][question]
 
 ## Getting Started
 
@@ -35,12 +36,14 @@ Supported versions: SQL Server 2005, SQL Server 2008, SQL Server 2008 R2, SQL Se
 [stars badge]:https://img.shields.io/github/stars/olahallengren/sql-server-maintenance-solution.svg
 [forks badge]:https://img.shields.io/github/forks/olahallengren/sql-server-maintenance-solution.svg
 [issues badge]:https://img.shields.io/github/issues/olahallengren/sql-server-maintenance-solution.svg
-[bug_report badge]:https://img.shields.io/github/issues/olahallengren/sql-server-maintenance-solution/bug_report.svg
-[feature_request badge]:https://img.shields.io/github/issues/olahallengren/sql-server-maintenance-solution/feature_request.svg
+[bug report badge]:https://img.shields.io/github/issues/olahallengren/sql-server-maintenance-solution/Bug%20Report.svg
+[feature request badge]:https://img.shields.io/github/issues/olahallengren/sql-server-maintenance-solution/Feature%20Request.svg
+[question badge]:https://img.shields.io/github/issues/olahallengren/sql-server-maintenance-solution/Question.svg
 
 [licence]:https://github.com/olahallengren/sql-server-maintenance-solution/blob/master/LICENSE
 [stars]:https://github.com/olahallengren/sql-server-maintenance-solution/stargazers
 [forks]:https://github.com/olahallengren/sql-server-maintenance-solution/network
 [issues]:https://github.com/olahallengren/sql-server-maintenance-solution/issues
-[bug_report]:https://github.com/olahallengren/sql-server-maintenance-solution/issues?q=is%3Aopen+is%3Aissue+label%3Abug_report
-[feature_request]:https://github.com/olahallengren/sql-server-maintenance-solution/issues?q=is%3Aopen+is%3Aissue+label%3Afeature_request
+[bug report]:https://github.com/olahallengren/sql-server-maintenance-solution/issues?q=is%3Aopen+is%3Aissue+label%3A%22Bug+Report%22
+[feature request]:https://github.com/olahallengren/sql-server-maintenance-solution/issues?q=is%3Aopen+is%3Aissue+label%3A%22Feature+Request%22
+[question]:https://github.com/olahallengren/sql-server-maintenance-solution/issues?q=is%3Aopen+is%3Aissue+label%3AQuestion
