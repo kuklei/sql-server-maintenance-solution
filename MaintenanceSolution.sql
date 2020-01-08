@@ -21,7 +21,7 @@ https://ola.hallengren.com
 
 */
 
-/*  --comment this line if you need to re/create the DB
+--/*  --comment this line if you need to re/create the DB
 
 WHILE EXISTS(select NULL from sys.databases where name='maintainDB')
 BEGIN
@@ -34,10 +34,27 @@ BEGIN
 END
 GO
 
+/*
+		Z:\Backup\SAD
+		SAD31 
+		ALKOS
+ 		TANIS
+		Kantina
+		KRACO
+		BM
+		MT 
+		PROGRESS
+		MARE
+		GEMA
+		JUGU
+		ECO
+		PAB2
+		Deka
+ */
 	CREATE DATABASE [maintainDB] ON  PRIMARY 
-	( NAME = N'maintainDB', FILENAME = N'Z:\SAD\Backup\maintainDB' , SIZE = 4096KB , FILEGROWTH = 4096KB )
+	( NAME = N'maintainDB', FILENAME = N'Z:\Backup\SAD\maintainDB' , SIZE = 4096KB , FILEGROWTH = 4096KB )
 	 LOG ON 
-	( NAME = N'maintainDB_log', FILENAME = N'Z:\SAD\Backup\maintainDBL' , SIZE = 4096KB , MAXSIZE = 1048576KB , FILEGROWTH = 4096KB )
+	( NAME = N'maintainDB_log', FILENAME = N'Z:\Backup\SAD\maintainDBL' , SIZE = 4096KB , MAXSIZE = 1048576KB , FILEGROWTH = 4096KB )
 	GO
 
 	ALTER DATABASE [maintainDB] SET COMPATIBILITY_LEVEL = 100
@@ -122,10 +139,20 @@ DECLARE @User_DBs nvarchar (MAX)
 DECLARE @OverrideJobs NVARCHAR(max)
 
 
+/*
+		DEFAULT - Z:\Backup\SAD
+		KRACO, ALKOS - X:\Backup (output dir Z:\Backup\SAD)
+		Kantina - Z:\Backup\OneDrive\Kantina
+		Jugu - Z:\Backup\OneDrive\JUGU
+		Deka - Z:\Backup\OneDrive\Deka
+		PAB - Z:\Backup\OneDrive\PAB
+
+*/
+
 SET @CreateJobs          = 'Y'					-- Specify whether jobs should be created.
-SET @BackupDirectory     = N'Z:\SAD\Backup'			-- Specify the backup root directory.
+SET @BackupDirectory     = N'Z:\Backup\OneDrive\PAB'			-- Specify the backup root directory.
 SET @CleanupTime         = 731					-- Time in hours, after which backup files are deleted. If no time is specified, then no backup files are deleted.
-SET @OutputFileDirectory = N'Z:\SAD\Backup'     -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
+SET @OutputFileDirectory = N'Z:\Backup\SAD'     -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
 SET @LogToTable          = 'Y'					-- Log commands to a table.
 SET @User_DBs			 = N'USER_DATABASES'	-- specify databases that will be considered user databases, leave 'USER_DATABASES' to backup all user dbs in server
 SET @OverrideJobs		 = 'Y'					-- specify Y if you want created jobs to be overriden by the new script (normally yes when directories have changed but keep in mind that jobs will need to be rescheduled
@@ -8259,9 +8286,9 @@ IF ((SELECT [Value] FROM #Config WHERE Name = 'OverrideJobs') = 'Y')
 		IF EXISTS (SELECT job_id FROM msdb.dbo.sysjobs_view WHERE name = 'DailyMaintenance')
 			EXEC msdb.dbo.sp_delete_job @job_name='DailyMaintenance', @delete_unused_schedule=1
 
-      EXECUTE msdb.dbo.sp_add_job @job_name = 'WeeklyMaintenance', @description = 'WeeklyMaintenance', @category_name = 'Database Maintenance', @owner_login_name = 'sad'
+      EXECUTE msdb.dbo.sp_add_job @job_name = 'WeeklyMaintenance', @description = 'WeeklyMaintenance', @category_name = 'Database Maintenance', @owner_login_name = @JobOwner
       EXECUTE msdb.dbo.sp_add_jobserver @job_name = 'WeeklyMaintenance'
-	  EXECUTE msdb.dbo.sp_add_job @job_name = 'DailyMaintenance', @description = 'DailyMaintenance', @category_name = 'Database Maintenance', @owner_login_name = 'sad'
+	  EXECUTE msdb.dbo.sp_add_job @job_name = 'DailyMaintenance', @description = 'DailyMaintenance', @category_name = 'Database Maintenance', @owner_login_name = @JobOwner
       EXECUTE msdb.dbo.sp_add_jobserver @job_name = 'DailyMaintenance'
 
 	  EXEC msdb.dbo.sp_add_jobschedule @job_name=N'WeeklyMaintenance', @name=N'WeeklyMaintenanceSchedule', 
