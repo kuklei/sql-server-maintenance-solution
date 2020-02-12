@@ -21,19 +21,6 @@ https://ola.hallengren.com
 
 */
 
---/*  --comment this line if you need to re/create the DB
-
-WHILE EXISTS(select NULL from sys.databases where name='maintainDB')
-BEGIN
-    DECLARE @SQL varchar(max)
-    SELECT @SQL = COALESCE(@SQL,'') + 'Kill ' + Convert(varchar, SPId) + ';'
-    FROM MASTER..SysProcesses
-    WHERE DBId = DB_ID(N'maintainDB') AND SPId <> @@SPId
-    EXEC(@SQL)
-    DROP DATABASE [maintainDB]
-END
-GO
-
 /*
 		Z:\Backup\SAD
 		SAD31 
@@ -50,7 +37,23 @@ GO
 		ECO
 		PAB2
 		Deka
+		BOZGO
  */
+
+
+/*  --comment this line if you need to re/create the DB
+
+WHILE EXISTS(select NULL from sys.databases where name='maintainDB')
+BEGIN
+    DECLARE @SQL varchar(max)
+    SELECT @SQL = COALESCE(@SQL,'') + 'Kill ' + Convert(varchar, SPId) + ';'
+    FROM MASTER..SysProcesses
+    WHERE DBId = DB_ID(N'maintainDB') AND SPId <> @@SPId
+    EXEC(@SQL)
+    DROP DATABASE [maintainDB]
+END
+GO
+
 	CREATE DATABASE [maintainDB] ON  PRIMARY 
 	( NAME = N'maintainDB', FILENAME = N'Z:\Backup\SAD\maintainDB' , SIZE = 4096KB , FILEGROWTH = 4096KB )
 	 LOG ON 
@@ -146,11 +149,12 @@ DECLARE @OverrideJobs NVARCHAR(max)
 		Jugu - Z:\Backup\OneDrive\JUGU
 		Deka - Z:\Backup\OneDrive\Deka
 		PAB - Z:\Backup\OneDrive\PAB
+		SAD31 - Z:\Backup\OneDrive\SAD31
 
 */
 
 SET @CreateJobs          = 'Y'					-- Specify whether jobs should be created.
-SET @BackupDirectory     = N'Z:\Backup\OneDrive\PAB'			-- Specify the backup root directory.
+SET @BackupDirectory     = N'Z:\Backup\OneDrive\SAD31'			-- Specify the backup root directory.
 SET @CleanupTime         = 731					-- Time in hours, after which backup files are deleted. If no time is specified, then no backup files are deleted.
 SET @OutputFileDirectory = N'Z:\Backup\SAD'     -- Specify the output file directory. If no directory is specified, then the SQL Server error log directory is used.
 SET @LogToTable          = 'Y'					-- Log commands to a table.
